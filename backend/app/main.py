@@ -1,0 +1,15 @@
+from fastapi import FastAPI
+from app.database import create_db_and_tables
+from app.routes import usuarios
+
+app = FastAPI()
+
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+app.include_router(usuarios.router)
+
+@app.get("/")
+def read_root():
+    return {"message": "Rede de Patas API está online!"}
