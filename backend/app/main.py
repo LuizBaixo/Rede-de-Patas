@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.database import create_db_and_tables
-from app.routes import usuarios
+from app.routes import usuarios, animais, ongs  
 
 app = FastAPI()
 
@@ -9,6 +9,8 @@ def on_startup():
     create_db_and_tables()
 
 app.include_router(usuarios.router)
+app.include_router(animais.router)
+app.include_router(ongs.router)  
 
 @app.get("/")
 def read_root():
