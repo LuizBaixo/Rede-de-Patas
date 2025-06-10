@@ -1,15 +1,16 @@
-import os
-from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlmodel import Session, select
+from app.database import engine
+from app.models import Animal, Usuario, UsuarioOngAssociacao
 from typing import List, Optional
 from pydantic import BaseModel
-from app.database import engine
-from app.models import Animal, Usuario
 from app.routes.usuarios import get_usuario_logado
+import os
+import shutil
 
 router = APIRouter()
 
+UPLOAD_DIR = "app/static/animais"
 
 class AnimalBase(BaseModel):
     nome: str
@@ -28,10 +29,8 @@ class AnimalBase(BaseModel):
     sociavel_com_caes: Optional[bool] = None
     foto_url: Optional[str] = None
 
-
 class AnimalCreate(AnimalBase):
     ong_id: Optional[int] = None
-
 
 class AnimalRead(AnimalBase):
     id: int
@@ -39,7 +38,6 @@ class AnimalRead(AnimalBase):
 
     class Config:
         orm_mode = True
-
 
 class AnimalUpdate(BaseModel):
     nome: Optional[str] = None
@@ -59,20 +57,25 @@ class AnimalUpdate(BaseModel):
     foto_url: Optional[str] = None
     ong_id: Optional[int] = None
 
-
 def get_session():
     with Session(engine) as session:
         yield session
 
-
 @router.post("/animais", response_model=AnimalRead)
-def criar_animal(animal: AnimalCreate, session: Session = Depends(get_session)):
+def criar_animal(
+    animal: AnimalCreate,
+    session: Session = Depends(get_session),
+    usuario: Usuario = Depends(get_usuario_logado)
+):
+    if not usuario.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem criar animais.")
+
     novo_animal = Animal.from_orm(animal)
+    novo_animal.ong_id = usuario.id  
     session.add(novo_animal)
     session.commit()
     session.refresh(novo_animal)
     return novo_animal
-
 
 @router.get("/animais", response_model=List[AnimalRead])
 def listar_animais(
@@ -89,9 +92,7 @@ def listar_animais(
     if sociavel_com_caes is not None:
         query = query.where(Animal.sociavel_com_caes == sociavel_com_caes)
 
-    animais = session.exec(query).all()
-    return animais
-
+    return session.exec(query).all()
 
 @router.get("/animais/{animal_id}", response_model=AnimalRead)
 def obter_animal(animal_id: int, session: Session = Depends(get_session)):
@@ -99,7 +100,6 @@ def obter_animal(animal_id: int, session: Session = Depends(get_session)):
     if not animal:
         raise HTTPException(status_code=404, detail="Animal não encontrado")
     return animal
-
 
 @router.put("/animais/{animal_id}", response_model=AnimalRead)
 def atualizar_animal(animal_id: int, dados: AnimalUpdate, session: Session = Depends(get_session)):
@@ -115,6 +115,33 @@ def atualizar_animal(animal_id: int, dados: AnimalUpdate, session: Session = Dep
     session.refresh(animal)
     return animal
 
+@router.put("/animais/{animal_id}/foto", response_model=AnimalRead)
+def atualizar_foto_animal(
+    animal_id: int,
+    arquivo: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    usuario: Usuario = Depends(get_usuario_logado)
+):
+    animal = session.get(Animal, animal_id)
+    if not animal:
+        raise HTTPException(status_code=404, detail="Animal não encontrado")
+
+    if not usuario.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem alterar a imagem")
+
+    filename = f"animal_{animal_id}_{arquivo.filename}"
+    caminho_completo = os.path.join(UPLOAD_DIR, filename)
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    with open(caminho_completo, "wb") as buffer:
+        shutil.copyfileobj(arquivo.file, buffer)
+
+    animal.foto_url = f"/static/animais/{filename}"
+    session.add(animal)
+    session.commit()
+    session.refresh(animal)
+    return animal
 
 @router.delete("/animais/{animal_id}", status_code=204)
 def deletar_animal(animal_id: int, session: Session = Depends(get_session)):
@@ -123,35 +150,3 @@ def deletar_animal(animal_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Animal não encontrado")
     session.delete(animal)
     session.commit()
-
-
-@router.post("/animais/{animal_id}/upload_foto")
-def upload_foto_animal(
-    animal_id: int,
-    arquivo: UploadFile = File(...),
-    usuario_logado: Usuario = Depends(get_usuario_logado),
-    session: Session = Depends(get_session)
-):
-    animal = session.get(Animal, animal_id)
-    if not animal:
-        raise HTTPException(status_code=404, detail="Animal não encontrado")
-
-    if animal.ong_id not in [ong.id for ong in usuario_logado.ongs]:
-        raise HTTPException(status_code=403, detail="Sem permissão para esse animal")
-
-    pasta = "uploads"
-    os.makedirs(pasta, exist_ok=True)
-
-    ext = os.path.splitext(arquivo.filename)[1]
-    nome_arquivo = f"{uuid4()}{ext}"
-    caminho = os.path.join(pasta, nome_arquivo)
-
-    with open(caminho, "wb") as buffer:
-        buffer.write(arquivo.file.read())
-
-    animal.foto_url = f"/uploads/{nome_arquivo}"
-    session.add(animal)
-    session.commit()
-    session.refresh(animal)
-
-    return {"foto_url": animal.foto_url}
