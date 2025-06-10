@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 
 
-SECRET_KEY = "sua_chave_secreta_segura"  # gere uma com uuid ou secrets
+SECRET_KEY = "sua_chave_secreta_segura"  
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

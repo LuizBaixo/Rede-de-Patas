@@ -34,7 +34,7 @@ class Usuario(SQLModel, table=True):
     tipo_animais: Optional[str] = None
     qtde_animais: Optional[int] = None
     is_admin: bool
-    ong_id: Optional[int] = Field(default=None, foreign_key="ong.id")  # relacionamento direto opcional
+    ong_id: Optional[int] = Field(default=None, foreign_key="ong.id") 
 
     ongs: List["Ong"] = Relationship(back_populates="administradores", link_model=UsuarioOngAssociacao)
 
