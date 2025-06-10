@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from app.database import engine
-from app.models import Animal, Usuario, UsuarioOngAssociacao
+from app.models import Animal
 from typing import List, Optional
 from pydantic import BaseModel
-from app.routes.usuarios import get_usuario_logado
 
 router = APIRouter()
 
@@ -23,6 +22,7 @@ class AnimalBase(BaseModel):
     disponivel: Optional[bool] = True
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
+    foto_url: Optional[str] = None  # <- NOVO
 
 class AnimalCreate(AnimalBase):
     ong_id: Optional[int] = None
@@ -49,6 +49,7 @@ class AnimalUpdate(BaseModel):
     disponivel: Optional[bool] = None
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
+    foto_url: Optional[str] = None  # <- NOVO
     ong_id: Optional[int] = None
 
 def get_session():
@@ -56,24 +57,7 @@ def get_session():
         yield session
 
 @router.post("/animais", response_model=AnimalRead)
-def criar_animal(
-    animal: AnimalCreate,
-    usuario_logado: Usuario = Depends(get_usuario_logado),
-    session: Session = Depends(get_session)
-):
-    if not usuario_logado.is_admin:
-        raise HTTPException(status_code=403, detail="Apenas administradores podem criar animais")
-
-    if animal.ong_id:
-        permissao = session.exec(
-            select(UsuarioOngAssociacao).where(
-                (UsuarioOngAssociacao.usuario_id == usuario_logado.id) &
-                (UsuarioOngAssociacao.ong_id == animal.ong_id)
-            )
-        ).first()
-        if not permissao:
-            raise HTTPException(status_code=403, detail="Você não tem permissão para cadastrar animal nessa ONG")
-
+def criar_animal(animal: AnimalCreate, session: Session = Depends(get_session)):
     novo_animal = Animal.from_orm(animal)
     session.add(novo_animal)
     session.commit()
@@ -126,26 +110,3 @@ def deletar_animal(animal_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Animal não encontrado")
     session.delete(animal)
     session.commit()
-
-@router.get("/animais/minhas-ongs", response_model=List[AnimalRead])
-def listar_animais_das_minhas_ongs(
-    usuario_logado: Usuario = Depends(get_usuario_logado),
-    session: Session = Depends(get_session),
-):
-    if not usuario_logado.is_admin:
-        raise HTTPException(status_code=403, detail="Apenas administradores podem ver seus animais")
-
-    ongs_ids = [
-        assoc.ong_id for assoc in session.exec(
-            select(UsuarioOngAssociacao).where(UsuarioOngAssociacao.usuario_id == usuario_logado.id)
-        ).all()
-    ]
-
-    if not ongs_ids:
-        return []
-
-    animais = session.exec(
-        select(Animal).where(Animal.ong_id.in_(ongs_ids))
-    ).all()
-
-    return animais

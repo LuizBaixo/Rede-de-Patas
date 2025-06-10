@@ -55,4 +55,5 @@ class Animal(SQLModel, table=True):
     disponivel: Optional[bool] = True
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
+    foto_url: Optional[str] = None  # <- NOVO CAMPO
     ong_id: Optional[int] = Field(default=None, foreign_key="usuario.id")
