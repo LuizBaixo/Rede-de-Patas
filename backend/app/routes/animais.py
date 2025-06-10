@@ -1,17 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from app.database import engine
-from app.models import Animal, Usuario
+from app.models import Animal, UsuarioOngAssociacao
 from typing import List, Optional
 from pydantic import BaseModel
 from app.routes.usuarios import get_usuario_logado
+from app.models import Usuario
 
 router = APIRouter()
 
 def get_session():
     with Session(engine) as session:
         yield session
-
 
 class AnimalBase(BaseModel):
     nome: str
@@ -29,10 +29,8 @@ class AnimalBase(BaseModel):
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
 
-
 class AnimalCreate(AnimalBase):
-    ong_id: Optional[int] = None
-
+    pass  # ong_id será definido automaticamente
 
 class AnimalRead(AnimalBase):
     id: int
@@ -40,7 +38,6 @@ class AnimalRead(AnimalBase):
 
     class Config:
         orm_mode = True
-
 
 class AnimalUpdate(BaseModel):
     nome: Optional[str] = None
@@ -57,32 +54,29 @@ class AnimalUpdate(BaseModel):
     disponivel: Optional[bool] = None
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
-    ong_id: Optional[int] = None
-
 
 @router.post("/animais", response_model=AnimalRead)
 def criar_animal(
     animal: AnimalCreate,
     session: Session = Depends(get_session),
-    usuario: Usuario = Depends(get_usuario_logado)
+    usuario_logado: Usuario = Depends(get_usuario_logado)
 ):
-    if not usuario.is_admin:
+    if not usuario_logado.is_admin:
         raise HTTPException(status_code=403, detail="Apenas administradores podem cadastrar animais")
 
-    if not animal.ong_id:
-        raise HTTPException(status_code=400, detail="É necessário informar o ID da ONG")
+    # Buscar uma ONG que o admin logado está associado
+    associacao = session.exec(
+        select(UsuarioOngAssociacao).where(UsuarioOngAssociacao.usuario_id == usuario_logado.id)
+    ).first()
 
-    # Verifica se o admin pertence à ONG especificada
-    ong_ids_admin = [ong.id for ong in usuario.ongs]
-    if animal.ong_id not in ong_ids_admin:
-        raise HTTPException(status_code=403, detail="Você não tem permissão para cadastrar animais nessa ONG")
+    if not associacao:
+        raise HTTPException(status_code=403, detail="Você não está associado a nenhuma ONG")
 
-    novo_animal = Animal.from_orm(animal)
+    novo_animal = Animal(**animal.dict(), ong_id=associacao.ong_id)
     session.add(novo_animal)
     session.commit()
     session.refresh(novo_animal)
     return novo_animal
-
 
 @router.get("/animais", response_model=List[AnimalRead])
 def listar_animais(
@@ -102,24 +96,6 @@ def listar_animais(
     animais = session.exec(query).all()
     return animais
 
-
-@router.get("/animais/minhas-ongs", response_model=List[AnimalRead])
-def listar_animais_ongs_admin(
-    session: Session = Depends(get_session),
-    usuario: Usuario = Depends(get_usuario_logado)
-):
-    if not usuario.is_admin:
-        raise HTTPException(status_code=403, detail="Acesso permitido apenas para administradores")
-
-    ong_ids = [ong.id for ong in usuario.ongs]
-    if not ong_ids:
-        return []
-
-    query = select(Animal).where(Animal.ong_id.in_(ong_ids))
-    animais = session.exec(query).all()
-    return animais
-
-
 @router.get("/animais/{animal_id}", response_model=AnimalRead)
 def obter_animal(animal_id: int, session: Session = Depends(get_session)):
     animal = session.get(Animal, animal_id)
@@ -127,16 +103,23 @@ def obter_animal(animal_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Animal não encontrado")
     return animal
 
-
 @router.put("/animais/{animal_id}", response_model=AnimalRead)
 def atualizar_animal(
     animal_id: int,
     dados: AnimalUpdate,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    usuario_logado: Usuario = Depends(get_usuario_logado)
 ):
     animal = session.get(Animal, animal_id)
     if not animal:
         raise HTTPException(status_code=404, detail="Animal não encontrado")
+
+    if not usuario_logado.is_admin or animal.ong_id not in [
+        assoc.ong_id for assoc in session.exec(
+            select(UsuarioOngAssociacao).where(UsuarioOngAssociacao.usuario_id == usuario_logado.id)
+        ).all()
+    ]:
+        raise HTTPException(status_code=403, detail="Você não pode atualizar este animal")
 
     for key, value in dados.dict(exclude_unset=True).items():
         setattr(animal, key, value)
@@ -146,11 +129,22 @@ def atualizar_animal(
     session.refresh(animal)
     return animal
 
-
 @router.delete("/animais/{animal_id}", status_code=204)
-def deletar_animal(animal_id: int, session: Session = Depends(get_session)):
+def deletar_animal(
+    animal_id: int,
+    session: Session = Depends(get_session),
+    usuario_logado: Usuario = Depends(get_usuario_logado)
+):
     animal = session.get(Animal, animal_id)
     if not animal:
         raise HTTPException(status_code=404, detail="Animal não encontrado")
+
+    if not usuario_logado.is_admin or animal.ong_id not in [
+        assoc.ong_id for assoc in session.exec(
+            select(UsuarioOngAssociacao).where(UsuarioOngAssociacao.usuario_id == usuario_logado.id)
+        ).all()
+    ]:
+        raise HTTPException(status_code=403, detail="Você não pode deletar este animal")
+
     session.delete(animal)
     session.commit()
