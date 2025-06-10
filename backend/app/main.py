@@ -1,6 +1,7 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.database import create_db_and_tables
-from app.routes import usuarios, animais, ongs, auth 
+from app.routes import usuarios, animais, ongs, auth
 
 app = FastAPI()
 
@@ -8,10 +9,14 @@ app = FastAPI()
 def on_startup():
     create_db_and_tables()
 
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
 app.include_router(usuarios.router)
 app.include_router(animais.router)
 app.include_router(ongs.router)
-app.include_router(auth.router)   
+app.include_router(auth.router)
 
 @app.get("/")
 def read_root():

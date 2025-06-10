@@ -1,11 +1,9 @@
 from typing import Optional, List, TYPE_CHECKING
 from sqlmodel import SQLModel, Field, Relationship
 
-
 class UsuarioOngAssociacao(SQLModel, table=True):
     usuario_id: Optional[int] = Field(default=None, foreign_key="usuario.id", primary_key=True)
     ong_id: Optional[int] = Field(default=None, foreign_key="ong.id", primary_key=True)
-
 
 class Ong(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -17,7 +15,6 @@ class Ong(SQLModel, table=True):
     site: Optional[str] = None
 
     administradores: List["Usuario"] = Relationship(back_populates="ongs", link_model=UsuarioOngAssociacao)
-
 
 class Usuario(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -34,10 +31,10 @@ class Usuario(SQLModel, table=True):
     tipo_animais: Optional[str] = None
     qtde_animais: Optional[int] = None
     is_admin: bool
-    ong_id: Optional[int] = Field(default=None, foreign_key="ong.id") 
+    senha: str
+    ong_id: Optional[int] = Field(default=None, foreign_key="ong.id")
 
     ongs: List["Ong"] = Relationship(back_populates="administradores", link_model=UsuarioOngAssociacao)
-
 
 class Animal(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -55,5 +52,5 @@ class Animal(SQLModel, table=True):
     disponivel: Optional[bool] = True
     sociavel_com_gatos: Optional[bool] = None
     sociavel_com_caes: Optional[bool] = None
-    foto_url: Optional[str] = None  # <- NOVO CAMPO
+    foto_url: Optional[str] = None  
     ong_id: Optional[int] = Field(default=None, foreign_key="usuario.id")
