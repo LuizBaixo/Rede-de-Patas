@@ -1,17 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from app.database import engine
-from app.models import Animal
+from app.models import Animal, Usuario, UsuarioOngAssociacao
 from typing import List, Optional
 from pydantic import BaseModel
 from app.routes.usuarios import get_usuario_logado
-from app.models import Usuario
 
 router = APIRouter()
-
-def get_session():
-    with Session(engine) as session:
-        yield session
 
 class AnimalBase(BaseModel):
     nome: str
@@ -56,13 +51,30 @@ class AnimalUpdate(BaseModel):
     sociavel_com_caes: Optional[bool] = None
     ong_id: Optional[int] = None
 
+def get_session():
+    with Session(engine) as session:
+        yield session
+
 @router.post("/animais", response_model=AnimalRead)
-def criar_animal(animal: AnimalCreate, usuario: Usuario = Depends(get_usuario_logado), session: Session = Depends(get_session)):
-    if not usuario.is_admin:
-        raise HTTPException(status_code=403, detail="Apenas administradores podem cadastrar animais.")
+def criar_animal(
+    animal: AnimalCreate,
+    usuario_logado: Usuario = Depends(get_usuario_logado),
+    session: Session = Depends(get_session)
+):
+    if not usuario_logado.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem criar animais")
+
+    if animal.ong_id:
+        permissao = session.exec(
+            select(UsuarioOngAssociacao).where(
+                (UsuarioOngAssociacao.usuario_id == usuario_logado.id) &
+                (UsuarioOngAssociacao.ong_id == animal.ong_id)
+            )
+        ).first()
+        if not permissao:
+            raise HTTPException(status_code=403, detail="Você não tem permissão para cadastrar animal nessa ONG")
 
     novo_animal = Animal.from_orm(animal)
-    novo_animal.ong_id = usuario.id  
     session.add(novo_animal)
     session.commit()
     session.refresh(novo_animal)
@@ -70,31 +82,18 @@ def criar_animal(animal: AnimalCreate, usuario: Usuario = Depends(get_usuario_lo
 
 @router.get("/animais", response_model=List[AnimalRead])
 def listar_animais(
-    nome: Optional[str] = Query(None),
-    especie: Optional[str] = Query(None),
-    porte: Optional[str] = Query(None),
     disponivel: Optional[bool] = Query(None),
     sociavel_com_gatos: Optional[bool] = Query(None),
     sociavel_com_caes: Optional[bool] = Query(None),
-    ong_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
 ):
     query = select(Animal)
-
-    if nome:
-        query = query.where(Animal.nome.ilike(f"%{nome}%"))
-    if especie:
-        query = query.where(Animal.especie.ilike(f"%{especie}%"))
-    if porte:
-        query = query.where(Animal.porte.ilike(f"%{porte}%"))
     if disponivel is not None:
         query = query.where(Animal.disponivel == disponivel)
     if sociavel_com_gatos is not None:
         query = query.where(Animal.sociavel_com_gatos == sociavel_com_gatos)
     if sociavel_com_caes is not None:
         query = query.where(Animal.sociavel_com_caes == sociavel_com_caes)
-    if ong_id is not None:
-        query = query.where(Animal.ong_id == ong_id)
 
     animais = session.exec(query).all()
     return animais
@@ -127,3 +126,26 @@ def deletar_animal(animal_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Animal não encontrado")
     session.delete(animal)
     session.commit()
+
+@router.get("/animais/minhas-ongs", response_model=List[AnimalRead])
+def listar_animais_das_minhas_ongs(
+    usuario_logado: Usuario = Depends(get_usuario_logado),
+    session: Session = Depends(get_session),
+):
+    if not usuario_logado.is_admin:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem ver seus animais")
+
+    ongs_ids = [
+        assoc.ong_id for assoc in session.exec(
+            select(UsuarioOngAssociacao).where(UsuarioOngAssociacao.usuario_id == usuario_logado.id)
+        ).all()
+    ]
+
+    if not ongs_ids:
+        return []
+
+    animais = session.exec(
+        select(Animal).where(Animal.ong_id.in_(ongs_ids))
+    ).all()
+
+    return animais
